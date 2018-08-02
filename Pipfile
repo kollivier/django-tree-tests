@@ -1,0 +1,16 @@
+[[source]]
+url = "https://pypi.org/simple"
+verify_ssl = true
+name = "pypi"
+
+[packages]
+django = "==1.11"
+django-treebeard = "*"
+django-mptt = "*"
+pytest-django = "*"
+pytest = "*"
+
+[dev-packages]
+
+[requires]
+python_version = "3.6"
