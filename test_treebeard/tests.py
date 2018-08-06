@@ -4,19 +4,28 @@ from django.conf import settings
 from django.db import connection, reset_queries
 from django.test import TestCase
 
-from test_mptt.models import Object, TreeNode
+from test_treebeard.models import Object, TreeNode
 
+
+def get(pk):
+    """
+    For speed, Treebeard uses raw queries for write operations that don't update the ORM objects.
+    If you need to write then read in the same procedure, you need to re-query it.
+
+    :param pk: The primary key of the TreeNode to retrieve
+    :return: TreeNode object (throws an exception if object with pk is not found or unique)
+    """
+    return TreeNode.objects.get(pk=pk)
 
 class PerfTestCase(TestCase):
 
     def setUp(self):
         settings.DEBUG = True
         reset_queries()
-        self.root_node = TreeNode.objects.create(name="The Root of All Nodes")
-        # self._report_queries("Creating root node")
+        self.root_node = TreeNode.add_root(name="The Root of All Nodes")
+        self.root_node = get(self.root_node.pk)
         reset_queries()
         self.root_node.save()
-        # self._report_queries("Saving root node")
 
     def _report_queries(self, operation):
         print("{} ran {} queries:".format(operation, len(connection.queries)))
@@ -31,17 +40,18 @@ class PerfTestCase(TestCase):
 
         return elapsed
 
-    def _create_nodes(self, num_nodes, levels=10):
+    def _create_nodes(self, num_nodes):
         parent = self.root_node
         count = TreeNode.objects.count()
         start = time.time()
-        with TreeNode.objects.delay_mptt_updates():
-            for i in range(num_nodes):
-                assert parent
-                new_node = TreeNode.objects.create(name="Child Node {}".format(i), parent=parent)
-                new_node.save()
-                if num_nodes > 20 and i > 0 and i % (num_nodes / levels) == 0:
-                    parent = new_node
+        settings.DEBUG = True
+        for i in range(num_nodes):
+            assert parent
+            reset_queries()
+            new_node = parent.add_child(name="Child Node {}".format(i))
+            # self._report_queries("Adding MP child")
+            if num_nodes > 20 and i > 0 and i % (num_nodes / 10) == 0:
+                parent = get(new_node.pk)
 
         assert TreeNode.objects.count() == count + num_nodes
         elapsed = time.time() - start
@@ -65,16 +75,22 @@ class PerfTestCase(TestCase):
         print("Getting {} descendants takes {} seconds".format(descendants.count(), elapsed))
 
     def test_move_nodes(self):
-        assert TreeNode.objects.count() == 1
-        self._create_nodes(10000, levels=10)
+        self._create_nodes(10000)
 
-        # print("Moving last MPTT root child five levels deep to front took {} seconds".format(elapsed))
+        node = self.root_node
+        for i in range(5):
+            node = node.get_last_child()
 
         start = time.time()
-        last_child = self.root_node.get_children().last()
-        first_child = self.root_node.get_children().first()
-        assert last_child.name != first_child.name
-        last_child.move_to(first_child, 'first-child')
+
+        node.move(node.get_parent().get_first_child(), 'left')
         elapsed = time.time() - start
 
-        print("Moving last MPTT root child to front took {} seconds".format(elapsed))
+        print("Moving last MP root child five levels deep to front took {} seconds".format(elapsed))
+
+        start = time.time()
+        last_child = self.root_node.get_last_child()
+        last_child.move(self.root_node.get_first_child(), 'first-child')
+        elapsed = time.time() - start
+
+        print("Moving last MP root child to front took {} seconds".format(elapsed))
